@@ -6,6 +6,8 @@
 
 struct obs_canvas;
 typedef struct obs_canvas obs_canvas_t;
+struct obs_source;
+typedef struct obs_source obs_source_t;
 
 namespace dibu {
 
@@ -30,7 +32,7 @@ public:
   [[nodiscard]] uint32_t height() const noexcept { return height_; }
 
 private:
-  static bool collectScene(void *context, struct obs_source *source);
+  static bool collectScene(void *context, obs_source_t *source);
   obs_canvas_t *findExistingCanvas() const;
 
   obs_canvas_t *canvas_ = nullptr;
