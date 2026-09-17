@@ -29,6 +29,9 @@ The Windows installer is produced by the included GitHub Actions workflow. Until
 - Records the vertical canvas independently using the current OBS recording encoder configuration.
 - Streams the vertical canvas to a separate custom RTMP server and key.
 - Provides a separate resizable `Dibu Vertical Preview` dock, independent of the controls dock.
+- Uses a compact tabbed control dock for Canvas, Sources, Automation and Output settings.
+- Lets creators edit source position, width, height, rotation and crop values while watching the dedicated preview.
+- Includes one-click Fit, Fill, Center and Reset transform actions.
 - Reacts to microphone activity by smoothly enlarging a selected webcam source.
 - Reveals selected chat and alert sources when those sources become active, with configurable hold times.
 - Includes test triggers for chat and alerts.
@@ -76,7 +79,7 @@ The included release workflow builds the plugin, arranges the standard OBS direc
 ## Next milestones
 
 1. Add motion and experimental character tracking for gameplay reframing.
-2. Add direct transform controls and drag-to-position editing in the vertical preview.
+2. Add drag-to-position editing directly inside the dedicated vertical preview.
 3. Add replay/backtrack and advanced audio routing.
 4. Add Smart Layout Conversion presets: Fill, Fit, Corner, Stack, Safe Zone and Manual Lock.
 5. Package signed Windows installer builds and test against supported OBS releases.
