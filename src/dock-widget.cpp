@@ -1,4 +1,5 @@
 #include "dock-widget.hpp"
+#include "dedicated-preview-dock.hpp"
 #include "preview-widget.hpp"
 
 #include <obs-frontend-api.h>
@@ -6,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFont>
 #include <QGroupBox>
@@ -22,6 +24,8 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <cmath>
 
 namespace dibu {
 
@@ -127,6 +131,63 @@ void DockWidget::buildUi()
   sourceLayout->addLayout(sourceButtons);
   root->addWidget(sourceGroup);
 
+  auto *actionGroup = new QGroupBox(tr("Action-Aware Layouts"));
+  auto *actionLayout = new QVBoxLayout(actionGroup);
+  actionsEnabledCheck_ = new QCheckBox(tr("Enable automatic layout reactions"));
+  actionsEnabledCheck_->setChecked(settings_.actionsEnabled);
+  actionLayout->addWidget(actionsEnabledCheck_);
+  auto *actionForm = new QFormLayout;
+  microphoneCombo_ = new QComboBox;
+  webcamCombo_ = new QComboBox;
+  chatCombo_ = new QComboBox;
+  alertCombo_ = new QComboBox;
+  thresholdSpin_ = new QDoubleSpinBox;
+  thresholdSpin_->setRange(-60.0, -5.0);
+  thresholdSpin_->setSuffix(tr(" dB"));
+  thresholdSpin_->setValue(settings_.talkingThresholdDb);
+  talkHoldSpin_ = new QSpinBox;
+  talkHoldSpin_->setRange(0, 5000);
+  talkHoldSpin_->setSuffix(tr(" ms"));
+  talkHoldSpin_->setValue(settings_.talkingHoldMs);
+  talkScaleSpin_ = new QSpinBox;
+  talkScaleSpin_->setRange(100, 250);
+  talkScaleSpin_->setSuffix(tr(" %"));
+  talkScaleSpin_->setValue(settings_.talkingScalePercent);
+  chatHoldSpin_ = new QSpinBox;
+  chatHoldSpin_->setRange(500, 30000);
+  chatHoldSpin_->setSuffix(tr(" ms"));
+  chatHoldSpin_->setValue(settings_.chatHoldMs);
+  alertHoldSpin_ = new QSpinBox;
+  alertHoldSpin_->setRange(500, 30000);
+  alertHoldSpin_->setSuffix(tr(" ms"));
+  alertHoldSpin_->setValue(settings_.alertHoldMs);
+  actionForm->addRow(tr("Microphone"), microphoneCombo_);
+  actionForm->addRow(tr("Webcam"), webcamCombo_);
+  actionForm->addRow(tr("Chat panel"), chatCombo_);
+  actionForm->addRow(tr("Alert source"), alertCombo_);
+  actionForm->addRow(tr("Talking threshold"), thresholdSpin_);
+  actionForm->addRow(tr("Talking hold"), talkHoldSpin_);
+  actionForm->addRow(tr("Webcam talking size"), talkScaleSpin_);
+  actionForm->addRow(tr("Chat display time"), chatHoldSpin_);
+  actionForm->addRow(tr("Alert display time"), alertHoldSpin_);
+  actionLayout->addLayout(actionForm);
+  auto *actionButtons = new QHBoxLayout;
+  auto *applyActionsButton = new QPushButton(tr("Apply"));
+  auto *refreshActionsButton = new QPushButton(tr("Refresh Sources"));
+  auto *testChatButton = new QPushButton(tr("Test Chat"));
+  auto *testAlertButton = new QPushButton(tr("Test Alert"));
+  cutsceneButton_ = new QPushButton(tr("Start Cutscene Mode"));
+  actionButtons->addWidget(applyActionsButton);
+  actionButtons->addWidget(refreshActionsButton);
+  actionButtons->addWidget(testChatButton);
+  actionButtons->addWidget(testAlertButton);
+  actionLayout->addLayout(actionButtons);
+  actionLayout->addWidget(cutsceneButton_);
+  actionStatus_ = new QLabel(tr("State: Normal"));
+  actionStatus_->setWordWrap(true);
+  actionLayout->addWidget(actionStatus_);
+  root->addWidget(actionGroup);
+
   auto *outputGroup = new QGroupBox(tr("Vertical Outputs"));
   auto *outputLayout = new QVBoxLayout(outputGroup);
   recordButton_ = new QPushButton(tr("Start Vertical Recording"));
@@ -166,10 +227,24 @@ void DockWidget::buildUi()
   });
   connect(recordButton_, &QPushButton::clicked, this, [this] { toggleRecording(); });
   connect(streamButton_, &QPushButton::clicked, this, [this] { toggleStreaming(); });
+  connect(applyActionsButton, &QPushButton::clicked, this, [this] { applyActionSettings(); });
+  connect(refreshActionsButton, &QPushButton::clicked, this, [this] {
+    applyActionSettings();
+    refreshActionSources();
+  });
+  connect(testChatButton, &QPushButton::clicked, this, [this] { actions_.triggerChat(); });
+  connect(testAlertButton, &QPushButton::clicked, this, [this] { actions_.triggerAlert(); });
+  connect(cutsceneButton_, &QPushButton::clicked, this, [this] {
+    actions_.toggleCutscene();
+    updateActionLayout();
+  });
 
   statusTimer_ = new QTimer(this);
   statusTimer_->setInterval(500);
   connect(statusTimer_, &QTimer::timeout, this, [this] { updateStatus(); });
+  actionTimer_ = new QTimer(this);
+  actionTimer_->setInterval(50);
+  connect(actionTimer_, &QTimer::timeout, this, [this] { updateActionLayout(); });
 }
 
 void DockWidget::initialize()
@@ -178,13 +253,18 @@ void DockWidget::initialize()
     return;
   initialized_ = true;
   refreshMasterScenes();
+  refreshActionSources();
   if (settings_.enabled)
     canvas_.start(settings_.width, settings_.height);
   preview_->setCanvas(canvas_.canvas());
+  if (dedicatedPreview_)
+    dedicatedPreview_->setCanvas(canvas_.canvas());
   refreshCanvasScenes();
   refreshCanvasSources();
   handleMainSceneChanged();
+  applyActionSettings();
   statusTimer_->start();
+  actionTimer_->start();
   updateStatus();
 }
 
@@ -193,9 +273,14 @@ void DockWidget::shutdown()
   if (!initialized_)
     return;
   statusTimer_->stop();
+  actionTimer_->stop();
   persist();
+  actions_.shutdown();
+  canvas_.clearActionLayout();
   outputs_.shutdown();
   preview_->setCanvas(nullptr);
+  if (dedicatedPreview_)
+    dedicatedPreview_->setCanvas(nullptr);
   canvas_.stop();
   initialized_ = false;
 }
@@ -276,6 +361,7 @@ void DockWidget::handleMainSceneChanged()
       QSignalBlocker blocker(canvasSceneCombo_);
       canvasSceneCombo_->setCurrentText(QString::fromStdString(*linked));
       refreshCanvasSources();
+      resetActionBaseline();
     }
   }
   updateStatus();
@@ -310,6 +396,7 @@ void DockWidget::activateSelectedCanvasScene()
   if (!name.empty())
     canvas_.activateScene(name);
   refreshCanvasSources();
+  resetActionBaseline();
   updateStatus();
 }
 
@@ -335,6 +422,7 @@ void DockWidget::addExistingSource()
     return;
   }
   refreshCanvasSources();
+  resetActionBaseline();
 }
 
 void DockWidget::removeSelectedSource()
@@ -344,6 +432,7 @@ void DockWidget::removeSelectedSource()
     return;
   canvas_.removeSource(item->data(Qt::UserRole).toString().toStdString());
   refreshCanvasSources();
+  resetActionBaseline();
 }
 
 void DockWidget::moveSelectedSource(bool up)
@@ -405,12 +494,110 @@ void DockWidget::applyCanvasSettings()
     canvas_.stop();
   }
   preview_->setCanvas(canvas_.canvas());
+  if (dedicatedPreview_)
+    dedicatedPreview_->setCanvas(canvas_.canvas());
   persist();
   refreshCanvasScenes();
   if (canvasSceneCombo_->count() > 0 && canvas_.activeScene().empty())
     canvas_.activateScene(canvasSceneCombo_->currentText().toStdString());
   refreshCanvasSources();
+  resetActionBaseline();
   updateStatus();
+}
+
+void DockWidget::setDedicatedPreview(DedicatedPreviewDock *preview)
+{
+  dedicatedPreview_ = preview;
+  if (dedicatedPreview_)
+    dedicatedPreview_->setCanvas(canvas_.canvas());
+}
+
+void DockWidget::refreshActionSources()
+{
+  const auto sources = canvas_.availableSources();
+  auto fill = [&sources](QComboBox *combo, const std::string &selected) {
+    QSignalBlocker blocker(combo);
+    combo->clear();
+    combo->addItem(QObject::tr("None"), QString{});
+    for (const auto &name : sources)
+      combo->addItem(QString::fromStdString(name), QString::fromStdString(name));
+    const int index = combo->findData(QString::fromStdString(selected));
+    combo->setCurrentIndex(index >= 0 ? index : 0);
+  };
+  fill(microphoneCombo_, settings_.microphoneSource);
+  fill(webcamCombo_, settings_.webcamSource);
+  fill(chatCombo_, settings_.chatSource);
+  fill(alertCombo_, settings_.alertSource);
+}
+
+void DockWidget::applyActionSettings()
+{
+  settings_.actionsEnabled = actionsEnabledCheck_->isChecked();
+  settings_.microphoneSource = microphoneCombo_->currentData().toString().toStdString();
+  settings_.webcamSource = webcamCombo_->currentData().toString().toStdString();
+  settings_.chatSource = chatCombo_->currentData().toString().toStdString();
+  settings_.alertSource = alertCombo_->currentData().toString().toStdString();
+  settings_.talkingThresholdDb = thresholdSpin_->value();
+  settings_.talkingHoldMs = talkHoldSpin_->value();
+  settings_.talkingScalePercent = talkScaleSpin_->value();
+  settings_.chatHoldMs = chatHoldSpin_->value();
+  settings_.alertHoldMs = alertHoldSpin_->value();
+
+  ActionLayoutConfig config;
+  config.enabled = settings_.actionsEnabled;
+  config.microphoneSource = settings_.microphoneSource;
+  config.chatSource = settings_.chatSource;
+  config.alertSource = settings_.alertSource;
+  config.talkingThresholdDb = static_cast<float>(settings_.talkingThresholdDb);
+  config.talkingHoldMs = settings_.talkingHoldMs;
+  config.chatHoldMs = settings_.chatHoldMs;
+  config.alertHoldMs = settings_.alertHoldMs;
+  canvas_.clearActionLayout();
+  actions_.configure(config);
+  animatedWebcamScale_ = 1.0f;
+  resetActionBaseline();
+  persist();
+  updateActionLayout();
+}
+
+void DockWidget::resetActionBaseline()
+{
+  canvas_.clearActionLayout();
+  if (settings_.actionsEnabled)
+    canvas_.captureActionBaseline(settings_.webcamSource, settings_.chatSource, settings_.alertSource);
+}
+
+void DockWidget::updateActionLayout()
+{
+  const auto state = actions_.tick();
+  const float targetScale = state == ActionLayoutState::Talking
+                              ? static_cast<float>(settings_.talkingScalePercent) / 100.0f
+                              : 1.0f;
+  animatedWebcamScale_ += (targetScale - animatedWebcamScale_) * 0.18f;
+  if (std::abs(targetScale - animatedWebcamScale_) < 0.002f)
+    animatedWebcamScale_ = targetScale;
+
+  if (settings_.actionsEnabled && canvas_.running()) {
+    canvas_.applyActionLayout(state, settings_.webcamSource, settings_.chatSource,
+                              settings_.alertSource, animatedWebcamScale_);
+  } else if (displayedActionState_ != ActionLayoutState::Normal) {
+    canvas_.clearActionLayout();
+  }
+  displayedActionState_ = state;
+
+  const QString stateText = QString::fromUtf8(ActionLayoutController::stateName(state));
+  if (actionStatus_)
+    actionStatus_->setText(tr("State: %1 | Mic peak: %2 dB")
+                             .arg(stateText)
+                             .arg(actions_.microphonePeakDb(), 0, 'f', 1));
+  if (cutsceneButton_)
+    cutsceneButton_->setText(actions_.cutscene() ? tr("End Cutscene Mode") : tr("Start Cutscene Mode"));
+  if (dedicatedPreview_)
+    dedicatedPreview_->setStatus(tr("%1 × %2 | %3 | %4")
+                                   .arg(canvas_.width())
+                                   .arg(canvas_.height())
+                                   .arg(QString::fromStdString(canvas_.activeScene()))
+                                   .arg(stateText));
 }
 
 void DockWidget::toggleRecording()
