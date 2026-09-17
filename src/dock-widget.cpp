@@ -1,6 +1,5 @@
 #include "dock-widget.hpp"
 #include "dedicated-preview-dock.hpp"
-#include "preview-widget.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -22,6 +21,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStringList>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -64,11 +64,20 @@ void DockWidget::buildUi()
   statusLabel_->setWordWrap(true);
   root->addWidget(statusLabel_);
 
-  auto *previewGroup = new QGroupBox(tr("Vertical Preview"));
-  auto *previewLayout = new QVBoxLayout(previewGroup);
-  preview_ = new PreviewWidget;
-  previewLayout->addWidget(preview_, 1);
-  root->addWidget(previewGroup, 1);
+  auto *tabs = new QTabWidget;
+  auto *canvasTab = new QWidget;
+  auto *canvasTabLayout = new QVBoxLayout(canvasTab);
+  auto *sourcesTab = new QWidget;
+  auto *sourcesTabLayout = new QVBoxLayout(sourcesTab);
+  auto *automationTab = new QWidget;
+  auto *automationTabLayout = new QVBoxLayout(automationTab);
+  auto *outputTab = new QWidget;
+  auto *outputTabLayout = new QVBoxLayout(outputTab);
+  tabs->addTab(canvasTab, tr("Canvas"));
+  tabs->addTab(sourcesTab, tr("Sources"));
+  tabs->addTab(automationTab, tr("Automation"));
+  tabs->addTab(outputTab, tr("Output"));
+  root->addWidget(tabs, 1);
 
   auto *canvasGroup = new QGroupBox(tr("Vertical Canvas"));
   auto *canvasForm = new QFormLayout(canvasGroup);
@@ -87,15 +96,16 @@ void DockWidget::buildUi()
   canvasForm->addRow(tr("Width"), widthSpin_);
   canvasForm->addRow(tr("Height"), heightSpin_);
   canvasForm->addRow(applyButton_);
-  root->addWidget(canvasGroup);
+  canvasTabLayout->addWidget(canvasGroup);
 
   auto *linkGroup = new QGroupBox(tr("Linked Scenes"));
   auto *linkLayout = new QVBoxLayout(linkGroup);
   auto *linkForm = new QFormLayout;
   masterSceneCombo_ = new QComboBox;
+  linkCanvasSceneCombo_ = new QComboBox;
   canvasSceneCombo_ = new QComboBox;
   linkForm->addRow(tr("Main OBS scene"), masterSceneCombo_);
-  linkForm->addRow(tr("Canvas scene"), canvasSceneCombo_);
+  linkForm->addRow(tr("Canvas scene"), linkCanvasSceneCombo_);
   linkLayout->addLayout(linkForm);
 
   auto *buttons = new QHBoxLayout;
@@ -110,10 +120,14 @@ void DockWidget::buildUi()
   linkSummary_ = new QLabel;
   linkSummary_->setWordWrap(true);
   linkLayout->addWidget(linkSummary_);
-  root->addWidget(linkGroup);
+  canvasTabLayout->addWidget(linkGroup);
+  canvasTabLayout->addStretch();
 
   auto *sourceGroup = new QGroupBox(tr("Vertical Sources"));
   auto *sourceLayout = new QVBoxLayout(sourceGroup);
+  auto *activeSceneForm = new QFormLayout;
+  activeSceneForm->addRow(tr("Active vertical scene"), canvasSceneCombo_);
+  sourceLayout->addLayout(activeSceneForm);
   sourceList_ = new QListWidget;
   sourceList_->setMinimumHeight(110);
   sourceLayout->addWidget(sourceList_);
@@ -129,7 +143,64 @@ void DockWidget::buildUi()
   sourceButtons->addWidget(moveUpButton);
   sourceButtons->addWidget(moveDownButton);
   sourceLayout->addLayout(sourceButtons);
-  root->addWidget(sourceGroup);
+  sourcesTabLayout->addWidget(sourceGroup);
+
+  auto *transformGroup = new QGroupBox(tr("Selected Source Transform"));
+  auto *transformLayout = new QVBoxLayout(transformGroup);
+  auto *transformForm = new QFormLayout;
+  positionXSpin_ = new QDoubleSpinBox;
+  positionYSpin_ = new QDoubleSpinBox;
+  sourceWidthSpin_ = new QDoubleSpinBox;
+  sourceHeightSpin_ = new QDoubleSpinBox;
+  rotationSpin_ = new QDoubleSpinBox;
+  for (auto *spin : {positionXSpin_, positionYSpin_}) {
+    spin->setRange(-7680.0, 7680.0);
+    spin->setDecimals(1);
+  }
+  for (auto *spin : {sourceWidthSpin_, sourceHeightSpin_}) {
+    spin->setRange(1.0, 15360.0);
+    spin->setDecimals(1);
+  }
+  rotationSpin_->setRange(-360.0, 360.0);
+  rotationSpin_->setDecimals(1);
+  transformForm->addRow(tr("Position X"), positionXSpin_);
+  transformForm->addRow(tr("Position Y"), positionYSpin_);
+  transformForm->addRow(tr("Width"), sourceWidthSpin_);
+  transformForm->addRow(tr("Height"), sourceHeightSpin_);
+  transformForm->addRow(tr("Rotation"), rotationSpin_);
+  transformLayout->addLayout(transformForm);
+  lockAspectCheck_ = new QCheckBox(tr("Lock aspect ratio"));
+  lockAspectCheck_->setChecked(true);
+  transformLayout->addWidget(lockAspectCheck_);
+
+  auto *quickLayout = new QHBoxLayout;
+  auto *fitButton = new QPushButton(tr("Fit"));
+  auto *fillButton = new QPushButton(tr("Fill"));
+  auto *centerButton = new QPushButton(tr("Center"));
+  auto *resetTransformButton = new QPushButton(tr("Reset"));
+  quickLayout->addWidget(fitButton);
+  quickLayout->addWidget(fillButton);
+  quickLayout->addWidget(centerButton);
+  quickLayout->addWidget(resetTransformButton);
+  transformLayout->addLayout(quickLayout);
+
+  auto *cropGroup = new QGroupBox(tr("Crop"));
+  auto *cropForm = new QFormLayout(cropGroup);
+  cropLeftSpin_ = new QSpinBox;
+  cropRightSpin_ = new QSpinBox;
+  cropTopSpin_ = new QSpinBox;
+  cropBottomSpin_ = new QSpinBox;
+  for (auto *spin : {cropLeftSpin_, cropRightSpin_, cropTopSpin_, cropBottomSpin_})
+    spin->setRange(0, 7680);
+  cropForm->addRow(tr("Left"), cropLeftSpin_);
+  cropForm->addRow(tr("Right"), cropRightSpin_);
+  cropForm->addRow(tr("Top"), cropTopSpin_);
+  cropForm->addRow(tr("Bottom"), cropBottomSpin_);
+  transformLayout->addWidget(cropGroup);
+  auto *applyTransformButton = new QPushButton(tr("Apply Transform"));
+  transformLayout->addWidget(applyTransformButton);
+  sourcesTabLayout->addWidget(transformGroup);
+  sourcesTabLayout->addStretch();
 
   auto *actionGroup = new QGroupBox(tr("Action-Aware Layouts"));
   auto *actionLayout = new QVBoxLayout(actionGroup);
@@ -186,7 +257,8 @@ void DockWidget::buildUi()
   actionStatus_ = new QLabel(tr("State: Normal"));
   actionStatus_->setWordWrap(true);
   actionLayout->addWidget(actionStatus_);
-  root->addWidget(actionGroup);
+  automationTabLayout->addWidget(actionGroup);
+  automationTabLayout->addStretch();
 
   auto *outputGroup = new QGroupBox(tr("Vertical Outputs"));
   auto *outputLayout = new QVBoxLayout(outputGroup);
@@ -206,7 +278,8 @@ void DockWidget::buildUi()
   outputStatus_ = new QLabel(tr("Outputs stopped"));
   outputStatus_->setWordWrap(true);
   outputLayout->addWidget(outputStatus_);
-  root->addWidget(outputGroup);
+  outputTabLayout->addWidget(outputGroup);
+  outputTabLayout->addStretch();
 
   connect(applyButton_, &QPushButton::clicked, this, [this] { applyCanvasSettings(); });
   connect(createButton, &QPushButton::clicked, this, [this] { createCanvasScene(); });
@@ -225,6 +298,31 @@ void DockWidget::buildUi()
     canvas_.setSourceVisible(item->data(Qt::UserRole).toString().toStdString(),
                              item->checkState() == Qt::Checked);
   });
+  connect(sourceList_, &QListWidget::currentItemChanged, this,
+          [this](QListWidgetItem *, QListWidgetItem *) { refreshSelectedSourceTransform(); });
+  connect(sourceWidthSpin_, &QDoubleSpinBox::valueChanged, this, [this](double width) {
+    if (refreshingTransform_ || !lockAspectCheck_->isChecked() || selectedAspectRatio_ <= 0.0)
+      return;
+    refreshingTransform_ = true;
+    sourceHeightSpin_->setValue(width / selectedAspectRatio_);
+    refreshingTransform_ = false;
+  });
+  connect(sourceHeightSpin_, &QDoubleSpinBox::valueChanged, this, [this](double height) {
+    if (refreshingTransform_ || !lockAspectCheck_->isChecked() || selectedAspectRatio_ <= 0.0)
+      return;
+    refreshingTransform_ = true;
+    sourceWidthSpin_->setValue(height * selectedAspectRatio_);
+    refreshingTransform_ = false;
+  });
+  connect(applyTransformButton, &QPushButton::clicked, this, [this] { applySelectedSourceTransform(); });
+  connect(fitButton, &QPushButton::clicked, this,
+          [this] { applySourceLayout(CanvasService::SourceLayout::Fit); });
+  connect(fillButton, &QPushButton::clicked, this,
+          [this] { applySourceLayout(CanvasService::SourceLayout::Fill); });
+  connect(centerButton, &QPushButton::clicked, this,
+          [this] { applySourceLayout(CanvasService::SourceLayout::Center); });
+  connect(resetTransformButton, &QPushButton::clicked, this,
+          [this] { applySourceLayout(CanvasService::SourceLayout::Reset); });
   connect(recordButton_, &QPushButton::clicked, this, [this] { toggleRecording(); });
   connect(streamButton_, &QPushButton::clicked, this, [this] { toggleStreaming(); });
   connect(applyActionsButton, &QPushButton::clicked, this, [this] { applyActionSettings(); });
@@ -256,7 +354,6 @@ void DockWidget::initialize()
   refreshActionSources();
   if (settings_.enabled)
     canvas_.start(settings_.width, settings_.height);
-  preview_->setCanvas(canvas_.canvas());
   if (dedicatedPreview_)
     dedicatedPreview_->setCanvas(canvas_.canvas());
   refreshCanvasScenes();
@@ -278,7 +375,6 @@ void DockWidget::shutdown()
   actions_.shutdown();
   canvas_.clearActionLayout();
   outputs_.shutdown();
-  preview_->setCanvas(nullptr);
   if (dedicatedPreview_)
     dedicatedPreview_->setCanvas(nullptr);
   canvas_.stop();
@@ -305,13 +401,21 @@ void DockWidget::refreshMasterScenes()
 void DockWidget::refreshCanvasScenes()
 {
   const QString selected = canvasSceneCombo_->currentText();
+  const QString linkedSelected = linkCanvasSceneCombo_->currentText();
   QSignalBlocker blocker(canvasSceneCombo_);
+  QSignalBlocker linkBlocker(linkCanvasSceneCombo_);
   canvasSceneCombo_->clear();
-  for (const auto &name : canvas_.scenes())
+  linkCanvasSceneCombo_->clear();
+  for (const auto &name : canvas_.scenes()) {
     canvasSceneCombo_->addItem(QString::fromStdString(name));
+    linkCanvasSceneCombo_->addItem(QString::fromStdString(name));
+  }
   const int oldIndex = canvasSceneCombo_->findText(selected);
   if (oldIndex >= 0)
     canvasSceneCombo_->setCurrentIndex(oldIndex);
+  const int linkedOldIndex = linkCanvasSceneCombo_->findText(linkedSelected);
+  if (linkedOldIndex >= 0)
+    linkCanvasSceneCombo_->setCurrentIndex(linkedOldIndex);
 }
 
 void DockWidget::refreshCanvasSources()
@@ -330,6 +434,9 @@ void DockWidget::refreshCanvasSources()
     if (item->data(Qt::UserRole).toString() == selected)
       sourceList_->setCurrentItem(item);
   }
+  if (!sourceList_->currentItem() && sourceList_->count() > 0)
+    sourceList_->setCurrentRow(0);
+  refreshSelectedSourceTransform();
 }
 
 std::string DockWidget::currentMainSceneName() const
@@ -360,6 +467,7 @@ void DockWidget::handleMainSceneChanged()
       canvas_.activateScene(*linked);
       QSignalBlocker blocker(canvasSceneCombo_);
       canvasSceneCombo_->setCurrentText(QString::fromStdString(*linked));
+      linkCanvasSceneCombo_->setCurrentText(QString::fromStdString(*linked));
       refreshCanvasSources();
       resetActionBaseline();
     }
@@ -385,6 +493,7 @@ void DockWidget::createCanvasScene()
   }
   refreshCanvasScenes();
   canvasSceneCombo_->setCurrentText(name);
+  linkCanvasSceneCombo_->setCurrentText(name);
   canvas_.activateScene(name.toStdString());
   refreshCanvasSources();
   updateStatus();
@@ -459,10 +568,67 @@ void DockWidget::toggleSelectedSourceVisibility()
   item->setCheckState(item->checkState() == Qt::Checked ? Qt::Unchecked : Qt::Checked);
 }
 
+void DockWidget::refreshSelectedSourceTransform()
+{
+  auto *item = sourceList_ ? sourceList_->currentItem() : nullptr;
+  const auto transform = item ? canvas_.sourceTransform(item->data(Qt::UserRole).toString().toStdString())
+                              : std::nullopt;
+  const bool enabled = transform.has_value();
+  for (auto *spin : {positionXSpin_, positionYSpin_, sourceWidthSpin_, sourceHeightSpin_, rotationSpin_})
+    spin->setEnabled(enabled);
+  for (auto *spin : {cropLeftSpin_, cropRightSpin_, cropTopSpin_, cropBottomSpin_})
+    spin->setEnabled(enabled);
+  if (!transform)
+    return;
+
+  refreshingTransform_ = true;
+  positionXSpin_->setValue(transform->x);
+  positionYSpin_->setValue(transform->y);
+  sourceWidthSpin_->setValue(transform->width);
+  sourceHeightSpin_->setValue(transform->height);
+  rotationSpin_->setValue(transform->rotation);
+  cropLeftSpin_->setValue(transform->cropLeft);
+  cropRightSpin_->setValue(transform->cropRight);
+  cropTopSpin_->setValue(transform->cropTop);
+  cropBottomSpin_->setValue(transform->cropBottom);
+  selectedAspectRatio_ = transform->height > 0.0 ? transform->width / transform->height : 1.0;
+  refreshingTransform_ = false;
+}
+
+void DockWidget::applySelectedSourceTransform()
+{
+  auto *item = sourceList_ ? sourceList_->currentItem() : nullptr;
+  if (!item)
+    return;
+  CanvasService::SourceTransform transform;
+  transform.x = positionXSpin_->value();
+  transform.y = positionYSpin_->value();
+  transform.width = sourceWidthSpin_->value();
+  transform.height = sourceHeightSpin_->value();
+  transform.rotation = rotationSpin_->value();
+  transform.cropLeft = cropLeftSpin_->value();
+  transform.cropRight = cropRightSpin_->value();
+  transform.cropTop = cropTopSpin_->value();
+  transform.cropBottom = cropBottomSpin_->value();
+  canvas_.setSourceTransform(item->data(Qt::UserRole).toString().toStdString(), transform);
+  resetActionBaseline();
+  refreshSelectedSourceTransform();
+}
+
+void DockWidget::applySourceLayout(CanvasService::SourceLayout layout)
+{
+  auto *item = sourceList_ ? sourceList_->currentItem() : nullptr;
+  if (!item)
+    return;
+  canvas_.layoutSource(item->data(Qt::UserRole).toString().toStdString(), layout);
+  resetActionBaseline();
+  refreshSelectedSourceTransform();
+}
+
 void DockWidget::linkSelectedScenes()
 {
   const std::string master = masterSceneCombo_->currentText().toStdString();
-  const std::string target = canvasSceneCombo_->currentText().toStdString();
+  const std::string target = linkCanvasSceneCombo_->currentText().toStdString();
   if (!settings_.links.link(master, target))
     return;
   persist();
@@ -493,7 +659,6 @@ void DockWidget::applyCanvasSettings()
     outputs_.shutdown();
     canvas_.stop();
   }
-  preview_->setCanvas(canvas_.canvas());
   if (dedicatedPreview_)
     dedicatedPreview_->setCanvas(canvas_.canvas());
   persist();
