@@ -1,4 +1,5 @@
 #include "canvas-service.hpp"
+#include "action-layout-controller.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -83,6 +84,7 @@ void CanvasService::stop()
   if (!canvas_)
     return;
 
+  clearActionLayout();
   obs_canvas_set_channel(canvas_, 0, nullptr);
   if (!obs_frontend_remove_canvas(canvas_))
     obs_canvas_remove(canvas_);
@@ -137,6 +139,8 @@ bool CanvasService::activateScene(const std::string &name)
   if (!canvas_ || name.empty())
     return false;
 
+  if (name != activeScene_)
+    clearActionLayout();
   obs_scene_t *scene = obs_canvas_get_scene_by_name(canvas_, name.c_str());
   if (!scene)
     return false;
@@ -176,6 +180,103 @@ bool CanvasService::addExistingSource(const std::string &sourceName)
   obs_source_release(source);
   obs_scene_release(scene);
   return item != nullptr;
+}
+
+void CanvasService::captureSourceBaseline(obs_scene_t *scene, const std::string &sourceName)
+{
+  if (!scene || sourceName.empty() || actionBaselines_.count(sourceName))
+    return;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item)
+    return;
+  ActionBaseline baseline;
+  obs_sceneitem_get_info(item, &baseline.transform);
+  baseline.visible = obs_sceneitem_visible(item);
+  actionBaselines_.emplace(sourceName, baseline);
+}
+
+void CanvasService::captureActionBaseline(const std::string &webcamSource, const std::string &chatSource,
+                                          const std::string &alertSource)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return;
+  captureSourceBaseline(scene, webcamSource);
+  captureSourceBaseline(scene, chatSource);
+  captureSourceBaseline(scene, alertSource);
+  obs_scene_release(scene);
+}
+
+void CanvasService::restoreSourceBaseline(obs_scene_t *scene, const std::string &sourceName)
+{
+  const auto found = actionBaselines_.find(sourceName);
+  if (!scene || sourceName.empty() || found == actionBaselines_.end())
+    return;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item)
+    return;
+  obs_sceneitem_set_info(item, &found->second.transform);
+  obs_sceneitem_set_visible(item, found->second.visible);
+}
+
+void CanvasService::setActionVisibility(obs_scene_t *scene, const std::string &sourceName, bool visible)
+{
+  if (!scene || sourceName.empty())
+    return;
+  if (obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str()))
+    obs_sceneitem_set_visible(item, visible);
+}
+
+void CanvasService::applyActionLayout(ActionLayoutState state, const std::string &webcamSource,
+                                      const std::string &chatSource, const std::string &alertSource,
+                                      float webcamScaleMultiplier)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return;
+  captureSourceBaseline(scene, webcamSource);
+  captureSourceBaseline(scene, chatSource);
+  captureSourceBaseline(scene, alertSource);
+
+  const auto baselineVisible = [this](const std::string &name) {
+    const auto found = actionBaselines_.find(name);
+    return found != actionBaselines_.end() && found->second.visible;
+  };
+  const bool cutscene = state == ActionLayoutState::Cutscene;
+  setActionVisibility(scene, webcamSource,
+                      !cutscene && (state == ActionLayoutState::Talking || baselineVisible(webcamSource)));
+  setActionVisibility(scene, chatSource,
+                      !cutscene && (state == ActionLayoutState::Chat || baselineVisible(chatSource)));
+  setActionVisibility(scene, alertSource,
+                      !cutscene && (state == ActionLayoutState::Alert || baselineVisible(alertSource)));
+
+  if (!cutscene) {
+    const auto baseline = actionBaselines_.find(webcamSource);
+    if (baseline != actionBaselines_.end()) {
+      if (obs_sceneitem_t *item = obs_scene_find_source(scene, webcamSource.c_str())) {
+        obs_transform_info transform = baseline->second.transform;
+        transform.scale.x *= webcamScaleMultiplier;
+        transform.scale.y *= webcamScaleMultiplier;
+        obs_sceneitem_set_info(item, &transform);
+      }
+    }
+  }
+  obs_scene_release(scene);
+}
+
+void CanvasService::clearActionLayout()
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (scene) {
+    for (const auto &[sourceName, baseline] : actionBaselines_) {
+      if (obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str())) {
+        obs_sceneitem_set_info(item, &baseline.transform);
+        obs_sceneitem_set_visible(item, baseline.visible);
+      }
+    }
+    obs_scene_release(scene);
+  }
+  actionBaselines_.clear();
 }
 
 bool CanvasService::removeSource(const std::string &sourceName)
