@@ -571,8 +571,9 @@ void DockWidget::toggleSelectedSourceVisibility()
 void DockWidget::refreshSelectedSourceTransform()
 {
   auto *item = sourceList_ ? sourceList_->currentItem() : nullptr;
-  const auto transform = item ? canvas_.sourceTransform(item->data(Qt::UserRole).toString().toStdString())
-                              : std::nullopt;
+  std::optional<CanvasService::SourceTransform> transform;
+  if (item)
+    transform = canvas_.sourceTransform(item->data(Qt::UserRole).toString().toStdString());
   const bool enabled = transform.has_value();
   for (auto *spin : {positionXSpin_, positionYSpin_, sourceWidthSpin_, sourceHeightSpin_, rotationSpin_})
     spin->setEnabled(enabled);
