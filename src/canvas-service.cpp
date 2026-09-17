@@ -190,7 +190,7 @@ void CanvasService::captureSourceBaseline(obs_scene_t *scene, const std::string 
   if (!item)
     return;
   ActionBaseline baseline;
-  obs_sceneitem_get_info(item, &baseline.transform);
+  obs_sceneitem_get_info2(item, &baseline.transform);
   baseline.visible = obs_sceneitem_visible(item);
   actionBaselines_.emplace(sourceName, baseline);
 }
@@ -215,7 +215,7 @@ void CanvasService::restoreSourceBaseline(obs_scene_t *scene, const std::string 
   obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
   if (!item)
     return;
-  obs_sceneitem_set_info(item, &found->second.transform);
+  obs_sceneitem_set_info2(item, &found->second.transform);
   obs_sceneitem_set_visible(item, found->second.visible);
 }
 
@@ -257,7 +257,7 @@ void CanvasService::applyActionLayout(ActionLayoutState state, const std::string
         obs_transform_info transform = baseline->second.transform;
         transform.scale.x *= webcamScaleMultiplier;
         transform.scale.y *= webcamScaleMultiplier;
-        obs_sceneitem_set_info(item, &transform);
+        obs_sceneitem_set_info2(item, &transform);
       }
     }
   }
@@ -270,7 +270,7 @@ void CanvasService::clearActionLayout()
   if (scene) {
     for (const auto &[sourceName, baseline] : actionBaselines_) {
       if (obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str())) {
-        obs_sceneitem_set_info(item, &baseline.transform);
+        obs_sceneitem_set_info2(item, &baseline.transform);
         obs_sceneitem_set_visible(item, baseline.visible);
       }
     }
