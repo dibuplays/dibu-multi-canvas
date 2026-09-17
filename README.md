@@ -4,7 +4,7 @@ An early native OBS Studio plugin for managing an additional canvas and linking 
 
 ## Normal user installation
 
-Release builds produce `Dibu-Multi-Canvas-Studio-0.2.0-windows-x64-Installer.exe`. Users only need to:
+Release builds produce `Dibu-Multi-Canvas-Studio-0.3.0-windows-x64-Installer.exe`. Users only need to:
 
 1. Close OBS Studio.
 2. Double-click the installer.
@@ -24,8 +24,12 @@ The Windows installer is produced by the included GitHub Actions workflow. Until
 - Switches the canvas scene whenever the main OBS scene changes.
 - Saves resolution, enabled state, and scene links.
 - Provides an OBS dock for canvas controls.
+- Renders the active vertical canvas in a native preview on Windows.
+- Provides vertical scene and source controls, including visibility and layer order.
+- Records the vertical canvas independently using the current OBS recording encoder configuration.
+- Streams the vertical canvas to a separate custom RTMP server and key.
 
-This is source code for an MVP, not a finished Aitum replacement. Streaming, recording, preview rendering, source editing, audio routing, installers, and smart layout conversion are intentionally listed as later milestones.
+This remains an early build rather than a complete Aitum replacement. Smart layout conversion, direct transform editing, replay/backtrack and advanced audio routing remain later milestones.
 
 ## Requirements
 
@@ -52,7 +56,7 @@ cmake --preset windows-x64 -DCMAKE_PREFIX_PATH="C:\path\to\obs-deps;C:\path\to\o
 cmake --build --preset windows-x64
 ```
 
-The included release workflow builds the plugin, arranges the standard OBS directory structure and compiles a modern Inno Setup `.exe` installer. Pushing a semantic version tag such as `0.2.0` also creates a draft GitHub release with the installer, portable ZIP and checksums.
+The included release workflow builds the plugin, arranges the standard OBS directory structure and compiles a modern Inno Setup `.exe` installer. Pushing a semantic version tag such as `0.3.0` also creates a draft GitHub release with the installer, portable ZIP and checksums.
 
 ## Architecture
 
@@ -63,12 +67,10 @@ The included release workflow builds the plugin, arranges the standard OBS direc
 
 ## Next milestones
 
-1. Render the canvas into a native OBS preview dock.
-2. Add canvas-specific Sources and Scenes docks.
-3. Add independent recording and replay/backtrack.
-4. Add independent streaming output and audio routing.
-5. Add Smart Layout Conversion presets: Fill, Fit, Corner, Stack, Safe Zone and Manual Lock.
-6. Package signed Windows installer builds and test against supported OBS releases.
+1. Add direct transform controls and drag-to-position editing in the vertical preview.
+2. Add replay/backtrack and advanced audio routing.
+3. Add Smart Layout Conversion presets: Fill, Fit, Corner, Stack, Safe Zone and Manual Lock.
+4. Package signed Windows installer builds and test against supported OBS releases.
 
 ## Originality and licensing
 
