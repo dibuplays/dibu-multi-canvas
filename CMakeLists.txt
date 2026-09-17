@@ -4,7 +4,7 @@ option(DIBU_BUILD_PLUGIN "Build the native OBS plugin" ON)
 option(DIBU_BUILD_TESTS "Build dependency-free core tests" ON)
 
 if(NOT DIBU_BUILD_PLUGIN)
-  project(dibu-multi-canvas VERSION 0.3.0 LANGUAGES CXX)
+  project(dibu-multi-canvas VERSION 0.4.0 LANGUAGES CXX)
   add_library(dibu-layout-core STATIC src/link-model.cpp src/link-model.hpp)
   target_compile_features(dibu-layout-core PUBLIC cxx_std_17)
   target_include_directories(dibu-layout-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -49,10 +49,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 target_sources(${PROJECT_NAME} PRIVATE
   src/plugin-main.cpp
+  src/action-layout-controller.cpp
+  src/action-layout-controller.hpp
   src/canvas-service.cpp
   src/canvas-service.hpp
   src/dock-widget.cpp
   src/dock-widget.hpp
+  src/dedicated-preview-dock.cpp
+  src/dedicated-preview-dock.hpp
   src/output-service.cpp
   src/output-service.hpp
   src/preview-widget.cpp
