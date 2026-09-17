@@ -43,6 +43,7 @@ PluginSettings SettingsStore::load() const
     result.height = static_cast<uint32_t>(height);
   if (obs_data_has_user_value(root, "enabled"))
     result.enabled = obs_data_get_bool(root, "enabled");
+  result.streamServer = obs_data_get_string(root, "stream_server");
 
   if (obs_data_array_t *links = obs_data_get_array(root, "links")) {
     const auto count = obs_data_array_count(links);
@@ -67,6 +68,7 @@ bool SettingsStore::save(const PluginSettings &settings) const
   obs_data_set_int(root, "width", settings.width);
   obs_data_set_int(root, "height", settings.height);
   obs_data_set_bool(root, "enabled", settings.enabled);
+  obs_data_set_string(root, "stream_server", settings.streamServer.c_str());
 
   obs_data_array_t *links = obs_data_array_create();
   for (const auto &[master, canvas] : settings.links.links()) {
