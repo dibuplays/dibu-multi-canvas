@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,20 @@ public:
     bool visible = true;
   };
 
+  struct SourceTransform {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 1.0;
+    double height = 1.0;
+    double rotation = 0.0;
+    int cropLeft = 0;
+    int cropRight = 0;
+    int cropTop = 0;
+    int cropBottom = 0;
+  };
+
+  enum class SourceLayout { Fit, Fill, Center, Reset };
+
   CanvasService() = default;
   ~CanvasService();
 
@@ -43,6 +58,9 @@ public:
   bool removeSource(const std::string &sourceName);
   bool setSourceVisible(const std::string &sourceName, bool visible);
   bool moveSource(const std::string &sourceName, bool up);
+  [[nodiscard]] std::optional<SourceTransform> sourceTransform(const std::string &sourceName) const;
+  bool setSourceTransform(const std::string &sourceName, const SourceTransform &transform);
+  bool layoutSource(const std::string &sourceName, SourceLayout layout);
   void captureActionBaseline(const std::string &webcamSource, const std::string &chatSource,
                              const std::string &alertSource);
   void applyActionLayout(ActionLayoutState state, const std::string &webcamSource,
