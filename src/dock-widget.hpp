@@ -18,7 +18,6 @@ class QSpinBox;
 class QTimer;
 
 namespace dibu {
-class PreviewWidget;
 class DedicatedPreviewDock;
 }
 
@@ -49,6 +48,9 @@ private:
   void removeSelectedSource();
   void moveSelectedSource(bool up);
   void toggleSelectedSourceVisibility();
+  void refreshSelectedSourceTransform();
+  void applySelectedSourceTransform();
+  void applySourceLayout(CanvasService::SourceLayout layout);
   void toggleRecording();
   void toggleStreaming();
   void refreshActionSources();
@@ -71,7 +73,7 @@ private:
   QSpinBox *heightSpin_ = nullptr;
   QComboBox *masterSceneCombo_ = nullptr;
   QComboBox *canvasSceneCombo_ = nullptr;
-  PreviewWidget *preview_ = nullptr;
+  QComboBox *linkCanvasSceneCombo_ = nullptr;
   QListWidget *sourceList_ = nullptr;
   QLabel *linkSummary_ = nullptr;
   QPushButton *applyButton_ = nullptr;
@@ -95,6 +97,18 @@ private:
   QSpinBox *alertHoldSpin_ = nullptr;
   QLabel *actionStatus_ = nullptr;
   QPushButton *cutsceneButton_ = nullptr;
+  QDoubleSpinBox *positionXSpin_ = nullptr;
+  QDoubleSpinBox *positionYSpin_ = nullptr;
+  QDoubleSpinBox *sourceWidthSpin_ = nullptr;
+  QDoubleSpinBox *sourceHeightSpin_ = nullptr;
+  QDoubleSpinBox *rotationSpin_ = nullptr;
+  QSpinBox *cropLeftSpin_ = nullptr;
+  QSpinBox *cropRightSpin_ = nullptr;
+  QSpinBox *cropTopSpin_ = nullptr;
+  QSpinBox *cropBottomSpin_ = nullptr;
+  QCheckBox *lockAspectCheck_ = nullptr;
+  bool refreshingTransform_ = false;
+  double selectedAspectRatio_ = 1.0;
   ActionLayoutState displayedActionState_ = ActionLayoutState::Normal;
   float animatedWebcamScale_ = 1.0f;
 };
