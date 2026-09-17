@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas-service.hpp"
+#include "action-layout-controller.hpp"
 #include "output-service.hpp"
 #include "settings-store.hpp"
 
@@ -8,6 +9,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -17,6 +19,7 @@ class QTimer;
 
 namespace dibu {
 class PreviewWidget;
+class DedicatedPreviewDock;
 }
 
 namespace dibu {
@@ -29,6 +32,7 @@ public:
   void initialize();
   void shutdown();
   void handleMainSceneChanged();
+  void setDedicatedPreview(DedicatedPreviewDock *preview);
 
 private:
   void buildUi();
@@ -47,12 +51,17 @@ private:
   void toggleSelectedSourceVisibility();
   void toggleRecording();
   void toggleStreaming();
+  void refreshActionSources();
+  void applyActionSettings();
+  void updateActionLayout();
+  void resetActionBaseline();
   void persist();
   [[nodiscard]] std::string currentMainSceneName() const;
 
   CanvasService canvas_;
   OutputService outputs_;
   SettingsStore store_;
+  ActionLayoutController actions_;
   PluginSettings settings_;
   bool initialized_ = false;
 
@@ -72,6 +81,22 @@ private:
   QLineEdit *serverEdit_ = nullptr;
   QLineEdit *keyEdit_ = nullptr;
   QTimer *statusTimer_ = nullptr;
+  QTimer *actionTimer_ = nullptr;
+  DedicatedPreviewDock *dedicatedPreview_ = nullptr;
+  QCheckBox *actionsEnabledCheck_ = nullptr;
+  QComboBox *microphoneCombo_ = nullptr;
+  QComboBox *webcamCombo_ = nullptr;
+  QComboBox *chatCombo_ = nullptr;
+  QComboBox *alertCombo_ = nullptr;
+  QDoubleSpinBox *thresholdSpin_ = nullptr;
+  QSpinBox *talkHoldSpin_ = nullptr;
+  QSpinBox *talkScaleSpin_ = nullptr;
+  QSpinBox *chatHoldSpin_ = nullptr;
+  QSpinBox *alertHoldSpin_ = nullptr;
+  QLabel *actionStatus_ = nullptr;
+  QPushButton *cutsceneButton_ = nullptr;
+  ActionLayoutState displayedActionState_ = ActionLayoutState::Normal;
+  float animatedWebcamScale_ = 1.0f;
 };
 
 } // namespace dibu
