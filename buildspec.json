@@ -31,7 +31,7 @@
   "platformConfig": {"macos": {"bundleId": "com.dibu.multicanvas"}},
   "name": "dibu-multi-canvas",
   "displayName": "Dibu Multi-Canvas Studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Dibu Plays",
   "website": "https://www.youtube.com/@iDibuPlays",
   "email": "",
