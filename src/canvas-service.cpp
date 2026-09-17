@@ -148,6 +148,71 @@ bool CanvasService::activateScene(const std::string &name)
   return true;
 }
 
+obs_scene_t *CanvasService::activeSceneRef() const
+{
+  if (!canvas_ || activeScene_.empty())
+    return nullptr;
+  return obs_canvas_get_scene_by_name(canvas_, activeScene_.c_str());
+}
+
+bool CanvasService::addExistingSource(const std::string &sourceName)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+
+  if (obs_scene_find_source(scene, sourceName.c_str())) {
+    obs_scene_release(scene);
+    return true;
+  }
+
+  obs_source_t *source = obs_get_source_by_name(sourceName.c_str());
+  if (!source) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_sceneitem_t *item = obs_scene_add(scene, source);
+  obs_source_release(source);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
+bool CanvasService::removeSource(const std::string &sourceName)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (item)
+    obs_sceneitem_remove(item);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
+bool CanvasService::setSourceVisible(const std::string &sourceName, bool visible)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  const bool changed = item && obs_sceneitem_set_visible(item, visible);
+  obs_scene_release(scene);
+  return changed;
+}
+
+bool CanvasService::moveSource(const std::string &sourceName, bool up)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (item)
+    obs_sceneitem_set_order(item, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
 bool CanvasService::collectScene(void *context, obs_source_t *source)
 {
   auto *result = static_cast<std::vector<std::string> *>(context);
@@ -163,6 +228,46 @@ std::vector<std::string> CanvasService::scenes() const
   if (canvas_)
     obs_canvas_enum_scenes(canvas_, collectScene, &result);
   std::sort(result.begin(), result.end());
+  return result;
+}
+
+bool CanvasService::collectAvailableSource(void *context, obs_source_t *source)
+{
+  auto *result = static_cast<std::vector<std::string> *>(context);
+  if (obs_source_get_type(source) != OBS_SOURCE_TYPE_INPUT)
+    return true;
+  const char *name = obs_source_get_name(source);
+  if (name && *name)
+    result->emplace_back(name);
+  return true;
+}
+
+std::vector<std::string> CanvasService::availableSources() const
+{
+  std::vector<std::string> result;
+  obs_enum_sources(collectAvailableSource, &result);
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
+bool CanvasService::collectSceneItem(obs_scene_t *, obs_sceneitem_t *item, void *context)
+{
+  auto *result = static_cast<std::vector<SceneItem> *>(context);
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const char *name = source ? obs_source_get_name(source) : nullptr;
+  if (name && *name)
+    result->push_back({name, obs_sceneitem_visible(item)});
+  return true;
+}
+
+std::vector<CanvasService::SceneItem> CanvasService::activeSceneItems() const
+{
+  std::vector<SceneItem> result;
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return result;
+  obs_scene_enum_items(scene, collectSceneItem, &result);
+  obs_scene_release(scene);
   return result;
 }
 
