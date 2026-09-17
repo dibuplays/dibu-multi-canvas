@@ -1,9 +1,11 @@
 #include "canvas-service.hpp"
+#include "action-layout-controller.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace dibu {
@@ -83,6 +85,7 @@ void CanvasService::stop()
   if (!canvas_)
     return;
 
+  clearActionLayout();
   obs_canvas_set_channel(canvas_, 0, nullptr);
   if (!obs_frontend_remove_canvas(canvas_))
     obs_canvas_remove(canvas_);
@@ -137,6 +140,8 @@ bool CanvasService::activateScene(const std::string &name)
   if (!canvas_ || name.empty())
     return false;
 
+  if (name != activeScene_)
+    clearActionLayout();
   obs_scene_t *scene = obs_canvas_get_scene_by_name(canvas_, name.c_str());
   if (!scene)
     return false;
@@ -144,6 +149,290 @@ bool CanvasService::activateScene(const std::string &name)
   obs_source_t *source = obs_scene_get_source(scene);
   obs_canvas_set_channel(canvas_, 0, source);
   activeScene_ = name;
+  obs_scene_release(scene);
+  return true;
+}
+
+obs_scene_t *CanvasService::activeSceneRef() const
+{
+  if (!canvas_ || activeScene_.empty())
+    return nullptr;
+  return obs_canvas_get_scene_by_name(canvas_, activeScene_.c_str());
+}
+
+bool CanvasService::addExistingSource(const std::string &sourceName)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+
+  if (obs_scene_find_source(scene, sourceName.c_str())) {
+    obs_scene_release(scene);
+    return true;
+  }
+
+  obs_source_t *source = obs_get_source_by_name(sourceName.c_str());
+  if (!source) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_sceneitem_t *item = obs_scene_add(scene, source);
+  obs_source_release(source);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
+void CanvasService::captureSourceBaseline(obs_scene_t *scene, const std::string &sourceName)
+{
+  if (!scene || sourceName.empty() || actionBaselines_.count(sourceName))
+    return;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item)
+    return;
+  ActionBaseline baseline;
+  obs_sceneitem_get_info2(item, &baseline.transform);
+  baseline.visible = obs_sceneitem_visible(item);
+  actionBaselines_.emplace(sourceName, baseline);
+}
+
+void CanvasService::captureActionBaseline(const std::string &webcamSource, const std::string &chatSource,
+                                          const std::string &alertSource)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return;
+  captureSourceBaseline(scene, webcamSource);
+  captureSourceBaseline(scene, chatSource);
+  captureSourceBaseline(scene, alertSource);
+  obs_scene_release(scene);
+}
+
+void CanvasService::restoreSourceBaseline(obs_scene_t *scene, const std::string &sourceName)
+{
+  const auto found = actionBaselines_.find(sourceName);
+  if (!scene || sourceName.empty() || found == actionBaselines_.end())
+    return;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item)
+    return;
+  obs_sceneitem_set_info2(item, &found->second.transform);
+  obs_sceneitem_set_visible(item, found->second.visible);
+}
+
+void CanvasService::setActionVisibility(obs_scene_t *scene, const std::string &sourceName, bool visible)
+{
+  if (!scene || sourceName.empty())
+    return;
+  if (obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str()))
+    obs_sceneitem_set_visible(item, visible);
+}
+
+void CanvasService::applyActionLayout(ActionLayoutState state, const std::string &webcamSource,
+                                      const std::string &chatSource, const std::string &alertSource,
+                                      float webcamScaleMultiplier)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return;
+  captureSourceBaseline(scene, webcamSource);
+  captureSourceBaseline(scene, chatSource);
+  captureSourceBaseline(scene, alertSource);
+
+  const auto baselineVisible = [this](const std::string &name) {
+    const auto found = actionBaselines_.find(name);
+    return found != actionBaselines_.end() && found->second.visible;
+  };
+  const bool cutscene = state == ActionLayoutState::Cutscene;
+  setActionVisibility(scene, webcamSource,
+                      !cutscene && (state == ActionLayoutState::Talking || baselineVisible(webcamSource)));
+  setActionVisibility(scene, chatSource,
+                      !cutscene && (state == ActionLayoutState::Chat || baselineVisible(chatSource)));
+  setActionVisibility(scene, alertSource,
+                      !cutscene && (state == ActionLayoutState::Alert || baselineVisible(alertSource)));
+
+  if (!cutscene) {
+    const auto baseline = actionBaselines_.find(webcamSource);
+    if (baseline != actionBaselines_.end()) {
+      if (obs_sceneitem_t *item = obs_scene_find_source(scene, webcamSource.c_str())) {
+        obs_transform_info transform = baseline->second.transform;
+        transform.scale.x *= webcamScaleMultiplier;
+        transform.scale.y *= webcamScaleMultiplier;
+        obs_sceneitem_set_info2(item, &transform);
+      }
+    }
+  }
+  obs_scene_release(scene);
+}
+
+void CanvasService::clearActionLayout()
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (scene) {
+    for (const auto &[sourceName, baseline] : actionBaselines_) {
+      if (obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str())) {
+        obs_sceneitem_set_info2(item, &baseline.transform);
+        obs_sceneitem_set_visible(item, baseline.visible);
+      }
+    }
+    obs_scene_release(scene);
+  }
+  actionBaselines_.clear();
+}
+
+bool CanvasService::removeSource(const std::string &sourceName)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (item)
+    obs_sceneitem_remove(item);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
+bool CanvasService::setSourceVisible(const std::string &sourceName, bool visible)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  const bool changed = item && obs_sceneitem_set_visible(item, visible);
+  obs_scene_release(scene);
+  return changed;
+}
+
+bool CanvasService::moveSource(const std::string &sourceName, bool up)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (item)
+    obs_sceneitem_set_order(item, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
+  obs_scene_release(scene);
+  return item != nullptr;
+}
+
+std::optional<CanvasService::SourceTransform> CanvasService::sourceTransform(const std::string &sourceName) const
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return std::nullopt;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return std::nullopt;
+  }
+
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+  obs_sceneitem_crop crop{};
+  obs_sceneitem_get_crop(item, &crop);
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const double sourceWidth = source ? obs_source_get_width(source) : 1.0;
+  const double sourceHeight = source ? obs_source_get_height(source) : 1.0;
+  const double croppedWidth = std::max(1.0, sourceWidth - crop.left - crop.right);
+  const double croppedHeight = std::max(1.0, sourceHeight - crop.top - crop.bottom);
+
+  SourceTransform result;
+  result.x = info.pos.x;
+  result.y = info.pos.y;
+  result.width = info.bounds_type == OBS_BOUNDS_NONE ? std::abs(info.scale.x) * croppedWidth : info.bounds.x;
+  result.height = info.bounds_type == OBS_BOUNDS_NONE ? std::abs(info.scale.y) * croppedHeight : info.bounds.y;
+  result.rotation = info.rot;
+  result.cropLeft = crop.left;
+  result.cropRight = crop.right;
+  result.cropTop = crop.top;
+  result.cropBottom = crop.bottom;
+  obs_scene_release(scene);
+  return result;
+}
+
+bool CanvasService::setSourceTransform(const std::string &sourceName, const SourceTransform &transform)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_sceneitem_crop crop{};
+  crop.left = std::max(0, transform.cropLeft);
+  crop.right = std::max(0, transform.cropRight);
+  crop.top = std::max(0, transform.cropTop);
+  crop.bottom = std::max(0, transform.cropBottom);
+  obs_sceneitem_set_crop(item, &crop);
+
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const double sourceWidth = source ? obs_source_get_width(source) : 1.0;
+  const double sourceHeight = source ? obs_source_get_height(source) : 1.0;
+  const double croppedWidth = std::max(1.0, sourceWidth - crop.left - crop.right);
+  const double croppedHeight = std::max(1.0, sourceHeight - crop.top - crop.bottom);
+
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+  info.pos.x = static_cast<float>(transform.x);
+  info.pos.y = static_cast<float>(transform.y);
+  info.rot = static_cast<float>(transform.rotation);
+  info.scale.x = static_cast<float>(std::max(1.0, transform.width) / croppedWidth);
+  info.scale.y = static_cast<float>(std::max(1.0, transform.height) / croppedHeight);
+  info.bounds_type = OBS_BOUNDS_NONE;
+  info.bounds.x = 0.0f;
+  info.bounds.y = 0.0f;
+  obs_sceneitem_set_info2(item, &info);
+  obs_scene_release(scene);
+  return true;
+}
+
+bool CanvasService::layoutSource(const std::string &sourceName, SourceLayout layout)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  obs_sceneitem_crop currentCrop{};
+  obs_sceneitem_get_crop(item, &currentCrop);
+  const float rawWidth = source ? static_cast<float>(obs_source_get_width(source)) : 1.0f;
+  const float rawHeight = source ? static_cast<float>(obs_source_get_height(source)) : 1.0f;
+  const float sourceWidth = std::max(1.0f, rawWidth - currentCrop.left - currentCrop.right);
+  const float sourceHeight = std::max(1.0f, rawHeight - currentCrop.top - currentCrop.bottom);
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+
+  if (layout == SourceLayout::Reset) {
+    info = {};
+    info.scale.x = 1.0f;
+    info.scale.y = 1.0f;
+    info.alignment = OBS_ALIGN_TOP | OBS_ALIGN_LEFT;
+    info.bounds_type = OBS_BOUNDS_NONE;
+    obs_sceneitem_crop crop{};
+    obs_sceneitem_set_crop(item, &crop);
+  } else {
+    info.pos.x = static_cast<float>(width_) / 2.0f;
+    info.pos.y = static_cast<float>(height_) / 2.0f;
+    info.alignment = OBS_ALIGN_CENTER;
+    if (layout != SourceLayout::Center) {
+      const float horizontal = static_cast<float>(width_) / std::max(1.0f, sourceWidth);
+      const float vertical = static_cast<float>(height_) / std::max(1.0f, sourceHeight);
+      const float scale = layout == SourceLayout::Fit ? std::min(horizontal, vertical)
+                                                       : std::max(horizontal, vertical);
+      info.scale.x = scale;
+      info.scale.y = scale;
+      info.bounds_type = OBS_BOUNDS_NONE;
+    }
+  }
+  obs_sceneitem_set_info2(item, &info);
   obs_scene_release(scene);
   return true;
 }
@@ -163,6 +452,46 @@ std::vector<std::string> CanvasService::scenes() const
   if (canvas_)
     obs_canvas_enum_scenes(canvas_, collectScene, &result);
   std::sort(result.begin(), result.end());
+  return result;
+}
+
+bool CanvasService::collectAvailableSource(void *context, obs_source_t *source)
+{
+  auto *result = static_cast<std::vector<std::string> *>(context);
+  if (obs_source_get_type(source) != OBS_SOURCE_TYPE_INPUT)
+    return true;
+  const char *name = obs_source_get_name(source);
+  if (name && *name)
+    result->emplace_back(name);
+  return true;
+}
+
+std::vector<std::string> CanvasService::availableSources() const
+{
+  std::vector<std::string> result;
+  obs_enum_sources(collectAvailableSource, &result);
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
+bool CanvasService::collectSceneItem(obs_scene_t *, obs_sceneitem_t *item, void *context)
+{
+  auto *result = static_cast<std::vector<SceneItem> *>(context);
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const char *name = source ? obs_source_get_name(source) : nullptr;
+  if (name && *name)
+    result->push_back({name, obs_sceneitem_visible(item)});
+  return true;
+}
+
+std::vector<CanvasService::SceneItem> CanvasService::activeSceneItems() const
+{
+  std::vector<SceneItem> result;
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene)
+    return result;
+  obs_scene_enum_items(scene, collectSceneItem, &result);
+  obs_scene_release(scene);
   return result;
 }
 
