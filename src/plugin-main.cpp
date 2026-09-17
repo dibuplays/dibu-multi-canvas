@@ -1,4 +1,5 @@
 #include "dock-widget.hpp"
+#include "dedicated-preview-dock.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -12,6 +13,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("dibu-multi-canvas", "en-US")
 
 namespace {
 dibu::DockWidget *g_dock = nullptr;
+dibu::DedicatedPreviewDock *g_previewDock = nullptr;
 
 void frontendEvent(enum obs_frontend_event event, void *)
 {
@@ -47,18 +49,27 @@ const char *obs_module_name()
 
 const char *obs_module_description()
 {
-  return "Independent OBS canvases with linked scene switching and future smart layout conversion.";
+  return "Independent OBS canvases with linked scenes, vertical outputs, dedicated preview and action-aware layouts.";
 }
 
 bool obs_module_load()
 {
   QWidget *mainWindow = static_cast<QWidget *>(obs_frontend_get_main_window());
   auto dock = std::make_unique<dibu::DockWidget>(mainWindow);
+  auto previewDock = std::make_unique<dibu::DedicatedPreviewDock>(mainWindow);
+  dock->setDedicatedPreview(previewDock.get());
   if (!obs_frontend_add_dock_by_id("dibu-multi-canvas", "Dibu Multi-Canvas Studio", dock.get())) {
     blog(LOG_ERROR, "[Dibu Multi-Canvas] Could not register the dock");
     return false;
   }
   g_dock = dock.release(); // The OBS dock owns the widget after successful registration.
+  if (!obs_frontend_add_dock_by_id("dibu-vertical-preview", "Dibu Vertical Preview", previewDock.get())) {
+    blog(LOG_ERROR, "[Dibu Multi-Canvas] Could not register the dedicated preview dock");
+    obs_frontend_remove_dock("dibu-multi-canvas");
+    g_dock = nullptr;
+    return false;
+  }
+  g_previewDock = previewDock.release();
 
   obs_frontend_add_event_callback(frontendEvent, nullptr);
   blog(LOG_INFO, "[Dibu Multi-Canvas] Loaded version %s", DIBU_PLUGIN_VERSION);
@@ -71,6 +82,8 @@ void obs_module_unload()
   if (g_dock)
     g_dock->shutdown();
   obs_frontend_remove_dock("dibu-multi-canvas");
+  obs_frontend_remove_dock("dibu-vertical-preview");
   g_dock = nullptr;
+  g_previewDock = nullptr;
   blog(LOG_INFO, "[Dibu Multi-Canvas] Unloaded");
 }
