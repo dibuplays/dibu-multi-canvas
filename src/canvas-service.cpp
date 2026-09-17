@@ -5,6 +5,7 @@
 #include <obs-module.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace dibu {
@@ -312,6 +313,128 @@ bool CanvasService::moveSource(const std::string &sourceName, bool up)
     obs_sceneitem_set_order(item, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
   obs_scene_release(scene);
   return item != nullptr;
+}
+
+std::optional<CanvasService::SourceTransform> CanvasService::sourceTransform(const std::string &sourceName) const
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return std::nullopt;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return std::nullopt;
+  }
+
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+  obs_sceneitem_crop crop{};
+  obs_sceneitem_get_crop(item, &crop);
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const double sourceWidth = source ? obs_source_get_width(source) : 1.0;
+  const double sourceHeight = source ? obs_source_get_height(source) : 1.0;
+  const double croppedWidth = std::max(1.0, sourceWidth - crop.left - crop.right);
+  const double croppedHeight = std::max(1.0, sourceHeight - crop.top - crop.bottom);
+
+  SourceTransform result;
+  result.x = info.pos.x;
+  result.y = info.pos.y;
+  result.width = info.bounds_type == OBS_BOUNDS_NONE ? std::abs(info.scale.x) * croppedWidth : info.bounds.x;
+  result.height = info.bounds_type == OBS_BOUNDS_NONE ? std::abs(info.scale.y) * croppedHeight : info.bounds.y;
+  result.rotation = info.rot;
+  result.cropLeft = crop.left;
+  result.cropRight = crop.right;
+  result.cropTop = crop.top;
+  result.cropBottom = crop.bottom;
+  obs_scene_release(scene);
+  return result;
+}
+
+bool CanvasService::setSourceTransform(const std::string &sourceName, const SourceTransform &transform)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_sceneitem_crop crop{};
+  crop.left = std::max(0, transform.cropLeft);
+  crop.right = std::max(0, transform.cropRight);
+  crop.top = std::max(0, transform.cropTop);
+  crop.bottom = std::max(0, transform.cropBottom);
+  obs_sceneitem_set_crop(item, &crop);
+
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  const double sourceWidth = source ? obs_source_get_width(source) : 1.0;
+  const double sourceHeight = source ? obs_source_get_height(source) : 1.0;
+  const double croppedWidth = std::max(1.0, sourceWidth - crop.left - crop.right);
+  const double croppedHeight = std::max(1.0, sourceHeight - crop.top - crop.bottom);
+
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+  info.pos.x = static_cast<float>(transform.x);
+  info.pos.y = static_cast<float>(transform.y);
+  info.rot = static_cast<float>(transform.rotation);
+  info.scale.x = static_cast<float>(std::max(1.0, transform.width) / croppedWidth);
+  info.scale.y = static_cast<float>(std::max(1.0, transform.height) / croppedHeight);
+  info.bounds_type = OBS_BOUNDS_NONE;
+  info.bounds.x = 0.0f;
+  info.bounds.y = 0.0f;
+  obs_sceneitem_set_info2(item, &info);
+  obs_scene_release(scene);
+  return true;
+}
+
+bool CanvasService::layoutSource(const std::string &sourceName, SourceLayout layout)
+{
+  obs_scene_t *scene = activeSceneRef();
+  if (!scene || sourceName.empty())
+    return false;
+  obs_sceneitem_t *item = obs_scene_find_source(scene, sourceName.c_str());
+  if (!item) {
+    obs_scene_release(scene);
+    return false;
+  }
+
+  obs_source_t *source = obs_sceneitem_get_source(item);
+  obs_sceneitem_crop currentCrop{};
+  obs_sceneitem_get_crop(item, &currentCrop);
+  const float rawWidth = source ? static_cast<float>(obs_source_get_width(source)) : 1.0f;
+  const float rawHeight = source ? static_cast<float>(obs_source_get_height(source)) : 1.0f;
+  const float sourceWidth = std::max(1.0f, rawWidth - currentCrop.left - currentCrop.right);
+  const float sourceHeight = std::max(1.0f, rawHeight - currentCrop.top - currentCrop.bottom);
+  obs_transform_info info{};
+  obs_sceneitem_get_info2(item, &info);
+
+  if (layout == SourceLayout::Reset) {
+    info = {};
+    info.scale.x = 1.0f;
+    info.scale.y = 1.0f;
+    info.alignment = OBS_ALIGN_TOP | OBS_ALIGN_LEFT;
+    info.bounds_type = OBS_BOUNDS_NONE;
+    obs_sceneitem_crop crop{};
+    obs_sceneitem_set_crop(item, &crop);
+  } else {
+    info.pos.x = static_cast<float>(width_) / 2.0f;
+    info.pos.y = static_cast<float>(height_) / 2.0f;
+    info.alignment = OBS_ALIGN_CENTER;
+    if (layout != SourceLayout::Center) {
+      const float horizontal = static_cast<float>(width_) / std::max(1.0f, sourceWidth);
+      const float vertical = static_cast<float>(height_) / std::max(1.0f, sourceHeight);
+      const float scale = layout == SourceLayout::Fit ? std::min(horizontal, vertical)
+                                                       : std::max(horizontal, vertical);
+      info.scale.x = scale;
+      info.scale.y = scale;
+      info.bounds_type = OBS_BOUNDS_NONE;
+    }
+  }
+  obs_sceneitem_set_info2(item, &info);
+  obs_scene_release(scene);
+  return true;
 }
 
 bool CanvasService::collectScene(void *context, obs_source_t *source)
