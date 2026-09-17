@@ -26,6 +26,9 @@ PreviewWidget::~PreviewWidget()
 
 void PreviewWidget::setCanvas(obs_canvas_t *canvas)
 {
+  if (canvas_ == canvas)
+    return;
+  destroyDisplay();
   canvas_ = canvas;
   if (canvas_ && isVisible())
     createDisplay();
