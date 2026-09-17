@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
+
+#include <obs.h>
 
 struct obs_canvas;
 typedef struct obs_canvas obs_canvas_t;
@@ -14,6 +17,8 @@ struct obs_scene_item;
 typedef struct obs_scene_item obs_sceneitem_t;
 
 namespace dibu {
+
+enum class ActionLayoutState;
 
 class CanvasService {
 public:
@@ -38,6 +43,12 @@ public:
   bool removeSource(const std::string &sourceName);
   bool setSourceVisible(const std::string &sourceName, bool visible);
   bool moveSource(const std::string &sourceName, bool up);
+  void captureActionBaseline(const std::string &webcamSource, const std::string &chatSource,
+                             const std::string &alertSource);
+  void applyActionLayout(ActionLayoutState state, const std::string &webcamSource,
+                         const std::string &chatSource, const std::string &alertSource,
+                         float webcamScaleMultiplier);
+  void clearActionLayout();
   [[nodiscard]] std::vector<std::string> scenes() const;
   [[nodiscard]] std::vector<std::string> availableSources() const;
   [[nodiscard]] std::vector<SceneItem> activeSceneItems() const;
@@ -54,10 +65,19 @@ private:
   obs_scene_t *activeSceneRef() const;
   obs_canvas_t *findExistingCanvas() const;
 
+  struct ActionBaseline {
+    obs_transform_info transform{};
+    bool visible = true;
+  };
+  void captureSourceBaseline(obs_scene_t *scene, const std::string &sourceName);
+  void restoreSourceBaseline(obs_scene_t *scene, const std::string &sourceName);
+  void setActionVisibility(obs_scene_t *scene, const std::string &sourceName, bool visible);
+
   obs_canvas_t *canvas_ = nullptr;
   uint32_t width_ = 1080;
   uint32_t height_ = 1920;
   std::string activeScene_;
+  std::map<std::string, ActionBaseline> actionBaselines_;
 };
 
 } // namespace dibu
